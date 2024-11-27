@@ -2,44 +2,55 @@
 #include "tm4c123gh6pm.h"
 #include <stdio.h>
 
-volatile uint32_t countdown_value = 0;     // Total milliseconds elapsed
-volatile uint8_t running = 0;              // Stopwatch state
+// Global variables for timing
+volatile uint32_t countdown_value = 0;
+volatile uint8_t running = 0;
 volatile uint32_t seconds = 0, minutes = 0, hours = 0, milliseconds = 0;
 
+// Function prototypes
+void SysTick_Init(void);
+void Buttons_Init(void);
+void LED_Init(void);
+void UART5_Init(void);
+void UART5_SendString(const char *str);
+void UART5_SendNumber(uint32_t num);
+void DisplayTime(void);
+void ControlLED(void);
+
 void SysTick_Init(void) {
-    NVIC_ST_CTRL_R = 0;                   // Disable SysTick during setup
-    NVIC_ST_RELOAD_R = 16000 - 1;         // Set reload value for 1ms interrupts
-    NVIC_ST_CURRENT_R = 0;                // Clear the current count
-    NVIC_ST_CTRL_R = 0x00000007;          // Enable SysTick with clock and interrupts
+    NVIC_ST_CTRL_R = 0;
+    NVIC_ST_RELOAD_R = 16000 - 1;  // 1 ms at 16 MHz clock
+    NVIC_ST_CURRENT_R = 0;
+    NVIC_ST_CTRL_R = 0x00000007;
 }
 
 void Buttons_Init(void) {
     // Initialize PortF for onboard button (reset)
-    SYSCTL_RCGCGPIO_R |= 0x00000020;      // Enable clock for PortF
-    GPIO_PORTF_LOCK_R = 0x4C4F434B;       // Unlock PortF
-    GPIO_PORTF_CR_R |= 0x1F;              // Allow changes to all PortF pins
-    GPIO_PORTF_DIR_R &= ~0x10;            // Set Pin 4 (SW1) as input
-    GPIO_PORTF_PUR_R |= 0x10;             // Enable pull-up resistor for Pin 4
-    GPIO_PORTF_DEN_R |= 0x10;             // Enable digital function for Pin 4
-    GPIO_PORTF_IS_R &= ~0x10;             // Set Pin 4 as edge-sensitive
-    GPIO_PORTF_IBE_R &= ~0x10;            // Set Pin 4 as not both edges
-    GPIO_PORTF_IEV_R &= ~0x10;            // Set Pin 4 as falling edge
-    GPIO_PORTF_ICR_R = 0x10;              // Clear any prior interrupt
-    GPIO_PORTF_IM_R |= 0x10;              // Enable interrupt for Pin 4
+    SYSCTL_RCGCGPIO_R |= 0x00000020;
+    GPIO_PORTF_LOCK_R = 0x4C4F434B;
+    GPIO_PORTF_CR_R |= 0x1F;
+    GPIO_PORTF_DIR_R &= ~0x10;
+    GPIO_PORTF_PUR_R |= 0x10;
+    GPIO_PORTF_DEN_R |= 0x10;
+    GPIO_PORTF_IS_R &= ~0x10;
+    GPIO_PORTF_IBE_R &= ~0x10;
+    GPIO_PORTF_IEV_R &= ~0x10;
+    GPIO_PORTF_ICR_R = 0x10;
+    GPIO_PORTF_IM_R |= 0x10;
 
     // Initialize PortA for IR module
-    SYSCTL_RCGCGPIO_R |= 0x00000001;      // Enable clock for PortA
-    GPIO_PORTA_DIR_R &= ~0x04;            // Set PA2 as input
-    GPIO_PORTA_DEN_R |= 0x04;             // Enable digital function for PA2
-    GPIO_PORTA_IS_R &= ~0x04;             // Edge-sensitive
-    GPIO_PORTA_IBE_R &= ~0x04;            // Not both edges
-    GPIO_PORTA_IEV_R |= 0x04;             // Rising edge trigger (object removed)
-    GPIO_PORTA_ICR_R = 0x04;              // Clear any prior interrupt
-    GPIO_PORTA_IM_R |= 0x04;              // Enable interrupt for PA2
+    SYSCTL_RCGCGPIO_R |= 0x00000001;
+    GPIO_PORTA_DIR_R &= ~0x04;
+    GPIO_PORTA_DEN_R |= 0x04;
+    GPIO_PORTA_IS_R &= ~0x04;
+    GPIO_PORTA_IBE_R &= ~0x04;
+    GPIO_PORTA_IEV_R |= 0x04;
+    GPIO_PORTA_ICR_R = 0x04;
+    GPIO_PORTA_IM_R |= 0x04;
 
     // Enable interrupts in NVIC
-    NVIC_EN0_R |= 0x40000000;             // Enable interrupt for PortF
-    NVIC_EN0_R |= 0x00000001;             // Enable interrupt for PortA
+    NVIC_EN0_R |= 0x40000000;
+    NVIC_EN0_R |= 0x00000001;
 }
 
 void LED_Init(void) {
@@ -59,47 +70,164 @@ void ControlLED(void) {
     }
 }
 
+void UART5_Init(void) {
+    // Enable UART5 and GPIOE clocks
+    SYSCTL_RCGCUART_R |= 0x00000020;
+    SYSCTL_RCGCGPIO_R |= 0x00000010;
+
+    // Configure PE4 and PE5 for UART5
+    GPIO_PORTE_AFSEL_R |= 0x30;
+    GPIO_PORTE_PCTL_R = (GPIO_PORTE_PCTL_R & 0xFF00FFFF) + 0x00110000;
+    GPIO_PORTE_DEN_R |= 0x30;
+
+    // Configure UART5 for 9600 baud rate
+    UART5_CTL_R &= ~0x0001;               // Disable UART5
+    UART5_IBRD_R = 104;                   // Integer part of baud rate divisor
+    UART5_FBRD_R = 11;                    // Fractional part of baud rate divisor
+    UART5_LCRH_R = 0x0060;                // 8-bit word length, enable FIFO
+    UART5_CTL_R = 0x0301;                 // Enable UART5, TXE, RXE
+}
+
+void UART5_SendString(const char *str) {
+    while(*str) {
+        while((UART5_FR_R & 0x0020) != 0);  // Wait until TX FIFO not full
+        UART5_DR_R = *str++;
+    }
+    // Add carriage return and line feed
+    while((UART5_FR_R & 0x0020) != 0);
+    UART5_DR_R = '\r';
+    while((UART5_FR_R & 0x0020) != 0);
+    UART5_DR_R = '\n';
+}
+
+void UART5_SendNumber(uint32_t num) {
+    char buffer[12];  // Enough for a 32-bit integer
+    int index = 0;
+
+    // Handle zero separately
+    if (num == 0) {
+        buffer[index++] = '0';
+    } else {
+        // Convert number to string in reverse order
+        while (num > 0) {
+            buffer[index++] = (num % 10) + '0';
+            num /= 10;
+        }
+    }
+
+    // Reverse the string
+    int start = 0;
+    int end = index - 1;
+    while (start < end) {
+        char temp = buffer[start];
+        buffer[start] = buffer[end];
+        buffer[end] = temp;
+        start++;
+        end--;
+    }
+
+    // Null-terminate the string
+    buffer[index] = '\0';
+
+    // Send the string
+    UART5_SendString(buffer);
+}
+
 void SysTick_Handler(void) {
     if (running) {
-        countdown_value++;                // Increment the total time counter
+        countdown_value++;
     }
 }
 
 void GPIOF_Handler(void) {
     GPIO_PORTF_ICR_R = 0x10;              // Acknowledge the interrupt for SW1
 
-    // Onboard SW1 button handling (reset functionality)
     running = 0;
     countdown_value = 0;                  // Reset countdown to zero
+    seconds = 0;
+    minutes = 0;
+    hours = 0;
+    milliseconds = 0;
+
     ControlLED();
+
+    UART5_SendString("Timer Reset");
 }
 
 void GPIOA_Handler(void) {
-    GPIO_PORTA_ICR_R = 0x04;              // Acknowledge the interrupt
+    // Clear the interrupt flag for PA2
+    GPIO_PORTA_ICR_R = 0x04;
 
-    // Active low IR sensor - 0 means object detected (low logic level)
+    // Read current IR sensor state (active low)
     uint8_t current_ir_state = (GPIO_PORTA_DATA_R & 0x04) == 0;
 
-    // Set running state based on IR sensor
-    running = current_ir_state;  // 1 when object detected, 0 when no object
+    if (current_ir_state) {
+        // Object detected
+        if (!running) {
+            // Start timing if not already running
+            running = 1;
+            countdown_value = 0;
+            seconds = 0;
+            minutes = 0;
+            milliseconds = 0;
 
-    ControlLED();
+            // Green LED on
+            ControlLED();
+
+            UART5_SendString("Object Detected - Timing Started");
+        }
+    } else {
+        // No object detected
+        if (running) {
+            // Stop timing if currently running
+            running = 0;
+
+            // Red LED on
+            ControlLED();
+
+            // Calculate final timing values
+            milliseconds = countdown_value % 1000;
+            seconds = (countdown_value / 1000) % 60;
+            minutes = (countdown_value / (1000 * 60)) % 60;
+
+            // Send timing data
+            UART5_SendString("Timing Duration:");
+
+            // Only send non-zero values
+            if (minutes > 0) {
+                UART5_SendNumber(minutes);
+                UART5_SendString(" min ");
+            }
+            if (seconds > 0 || minutes > 0) {
+                UART5_SendNumber(seconds);
+                UART5_SendString(" sec ");
+            }
+            UART5_SendNumber(milliseconds);
+            UART5_SendString(" ms");
+        }
+    }
 }
 
 void DisplayTime(void) {
-    // Convert countdown_value to H:M:S format
-    milliseconds = countdown_value % 1000;
-    seconds = (countdown_value / 1000) % 60;
-    minutes = (countdown_value / (1000 * 60)) % 60;
-    hours = (countdown_value / (1000 * 3600)) % 24;
+    if (running) {
+        milliseconds = countdown_value % 1000;
+        seconds = (countdown_value / 1000) % 60;
+        minutes = (countdown_value / (1000 * 60)) % 60;
+    }
 }
 
 int main(void) {
+    // Initialize all necessary modules
     SysTick_Init();
     Buttons_Init();
     LED_Init();
+    UART5_Init();
+
+    // Initial LED state
+    ControlLED();
 
     while (1) {
+        // Continuously update time if running
         DisplayTime();
     }
 }
