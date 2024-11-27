@@ -77,11 +77,11 @@ void GPIOF_Handler(void) {
 void GPIOA_Handler(void) {
     GPIO_PORTA_ICR_R = 0x04;              // Acknowledge the interrupt
 
-    // Active low IR sensor - 0 means object detected, 1 means no object
+    // Active low IR sensor - 0 means object detected (low logic level)
     uint8_t current_ir_state = (GPIO_PORTA_DATA_R & 0x04) == 0;
 
-    // Toggle running state when IR input changes
-    running = !running;
+    // Set running state based on IR sensor
+    running = current_ir_state;  // 1 when object detected, 0 when no object
 
     ControlLED();
 }
