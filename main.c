@@ -4,8 +4,7 @@
 
 volatile uint32_t countdown_value = 0;     // Total milliseconds elapsed
 volatile uint8_t running = 0;              // Stopwatch state
-volatile uint8_t ir_state = 1;             // Previous IR sensor state (1 means no obstruction)
-volatile uint32_t seconds=0, minutes=0, hours=0, milliseconds = 0;
+volatile uint32_t seconds = 0, minutes = 0, hours = 0, milliseconds = 0;
 
 void SysTick_Init(void) {
     NVIC_ST_CTRL_R = 0;                   // Disable SysTick during setup
@@ -15,7 +14,7 @@ void SysTick_Init(void) {
 }
 
 void Buttons_Init(void) {
-    // Initialize PortF for onboard buttons
+    // Initialize PortF for onboard button (reset)
     SYSCTL_RCGCGPIO_R |= 0x00000020;      // Enable clock for PortF
     GPIO_PORTF_LOCK_R = 0x4C4F434B;       // Unlock PortF
     GPIO_PORTF_CR_R |= 0x1F;              // Allow changes to all PortF pins
@@ -34,7 +33,7 @@ void Buttons_Init(void) {
     GPIO_PORTA_DEN_R |= 0x04;             // Enable digital function for PA2
     GPIO_PORTA_IS_R &= ~0x04;             // Edge-sensitive
     GPIO_PORTA_IBE_R &= ~0x04;            // Not both edges
-    GPIO_PORTA_IEV_R &= ~0x04;            // Falling edge trigger
+    GPIO_PORTA_IEV_R |= 0x04;             // Rising edge trigger (object removed)
     GPIO_PORTA_ICR_R = 0x04;              // Clear any prior interrupt
     GPIO_PORTA_IM_R |= 0x04;              // Enable interrupt for PA2
 
@@ -60,7 +59,6 @@ void ControlLED(void) {
     }
 }
 
-// Interrupt Handlers
 void SysTick_Handler(void) {
     if (running) {
         countdown_value++;                // Increment the total time counter
@@ -79,17 +77,11 @@ void GPIOF_Handler(void) {
 void GPIOA_Handler(void) {
     GPIO_PORTA_ICR_R = 0x04;              // Acknowledge the interrupt
 
-    // Active low IR sensor - 0 means object detected
+    // Active low IR sensor - 0 means object detected, 1 means no object
     uint8_t current_ir_state = (GPIO_PORTA_DATA_R & 0x04) == 0;
 
-    // First detection starts the watch
-    if (!running && current_ir_state == 0) {
-        running = 1;
-    }
-    // No detection stops the watch
-    else if (running && current_ir_state == 1) {
-        running = 0;
-    }
+    // Toggle running state when IR input changes
+    running = !running;
 
     ControlLED();
 }
